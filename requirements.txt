@@ -1,0 +1,5 @@
+# Prediction Market Platform
+# This file tells Railway/Nixpacks this is a Python project
+# Main dependencies are in backend/requirements.txt
+
+-r backend/requirements.txt
