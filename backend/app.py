@@ -1590,14 +1590,11 @@ with app.app_context():
 
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
 if __name__ == '__main__':
-    # Inicializar base de datos
-    init_database()
-    
-    # Configurar puerto para Railway
+    # Configurar puerto
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    debug = os.environ.get('FLASK_ENV') == 'development'
     
-    print(f"🚀 Iniciando servidor en puerto {port} (debug={debug})")
+    print(f"🚀 Iniciando servidor en puerto {port} (modo {'desarrollo' if debug else 'producción'})")
     
     app.run(
         host='0.0.0.0',
@@ -1605,4 +1602,3 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
-
