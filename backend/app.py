@@ -1568,6 +1568,26 @@ def init_database():
             logger.error(f"Error inicializando base de datos: {str(e)}")
             raise
 
+# ==================== INICIALIZACIÓN AUTOMÁTICA DE BASE DE DATOS ====================
+# Crear tablas automáticamente en Railway/Heroku
+with app.app_context():
+    try:
+        db.create_all()
+        logger.info("✅ Tablas de base de datos verificadas/creadas")
+        
+        # Verificar si hay mercados, si no, crear algunos
+        if Market.query.count() == 0:
+            try:
+                import_markets_from_json('markets_data.json')
+            except FileNotFoundError:
+                # Fallback a inicialización por código
+                initialize_markets()
+            logger.info(f"✅ {Market.query.count()} mercados inicializados")
+            
+    except Exception as e:
+        logger.error(f"❌ Error inicializando base de datos: {str(e)}")
+        # No lanzar excepción para no bloquear el inicio 
+
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
 if __name__ == '__main__':
     # Inicializar base de datos
@@ -1585,3 +1605,4 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
