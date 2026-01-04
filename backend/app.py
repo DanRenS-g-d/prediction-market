@@ -388,7 +388,7 @@ class ResolutionBatch(db.Model):
     market = db.relationship('Market', backref='resolution_batches')
     resolver = db.relationship('User', foreign_keys=[resolved_by])
     payments = db.relationship('ResolutionPayment', backref='batch', cascade='all, delete-orphan')
-    evidence = db.relationship('ResolutionEvidence', backref='batch', cascade='all, delete-orphan')
+    evidence = db.relationship('ResolutionEvidence', backref='resolution_batch', cascade='all, delete-orphan')
     
     __table_args__ = (
         db.Index('idx_batches_market', 'market_id'),
@@ -1602,3 +1602,4 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
