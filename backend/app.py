@@ -711,7 +711,20 @@ def import_markets_from_json(filename: str):
         logger.info(f"Intentando importar mercados desde {filename}")
         
         with open(filename, 'r', encoding='utf-8') as f:
-            markets_data = json.load(f)
+            data = json.load(f)
+        
+        # Manejar diferentes formatos de JSON
+        # Formato 1: Array directo de mercados
+        # Formato 2: Objeto con clave "markets" (como tu archivo actual)
+        if isinstance(data, dict) and 'markets' in data:
+            logger.info(f"Detectado formato con clave 'markets', extrayendo {len(data['markets'])} mercados")
+            markets_data = data['markets']
+        elif isinstance(data, list):
+            logger.info(f"Detectado formato array directo con {len(data)} mercados")
+            markets_data = data
+        else:
+            logger.error(f"Formato JSON no reconocido. Esperado: array o objeto con clave 'markets'")
+            raise ValueError("Formato JSON no reconocido")
         
         imported_count = 0
         skipped_count = 0
@@ -724,6 +737,20 @@ def import_markets_from_json(filename: str):
                 skipped_count += 1
                 continue
             
+            # Parsear fechas - manejar diferentes formatos
+            close_time_str = market_data['close_time']
+            resolve_deadline_str = market_data['resolve_deadline']
+            
+            # Normalizar formato de fecha (agregar Z si no tiene zona horaria)
+            if 'Z' not in close_time_str and '+' not in close_time_str:
+                close_time_str = close_time_str + 'Z'
+            if 'Z' not in resolve_deadline_str and '+' not in resolve_deadline_str:
+                resolve_deadline_str = resolve_deadline_str + 'Z'
+            
+            # Convertir a datetime
+            close_time = datetime.fromisoformat(close_time_str.replace('Z', '+00:00'))
+            resolve_deadline = datetime.fromisoformat(resolve_deadline_str.replace('Z', '+00:00'))
+            
             # Crear nuevo mercado
             market = Market(
                 slug=market_data['slug'],
@@ -735,21 +762,26 @@ def import_markets_from_json(filename: str):
                 b=float(market_data.get('b', 100.0)),
                 q_yes=float(market_data.get('q_yes', 0.0)),
                 q_no=float(market_data.get('q_no', 0.0)),
-                close_time=datetime.fromisoformat(market_data['close_time'].replace('Z', '+00:00')),
-                resolve_deadline=datetime.fromisoformat(market_data['resolve_deadline'].replace('Z', '+00:00')),
+                close_time=close_time,
+                resolve_deadline=resolve_deadline,
                 max_shares_per_buy=float(market_data.get('max_shares_per_buy', 10000.0)),
                 max_long_position_per_user=float(market_data.get('max_long_position_per_user', 100000.0)),
-                status='open'
+                status=market_data.get('status', 'open')
             )
             
             db.session.add(market)
             imported_count += 1
             
-            logger.info(f"➕ Mercado creado: {market.slug}")
+            logger.info(f"➕ Mercado creado: {market.slug} (cierre: {close_time})")
         
         db.session.commit()
         
         logger.info(f"✅ Importación completada: {imported_count} nuevos, {skipped_count} existentes")
+        
+        # Log metadata si existe
+        if isinstance(data, dict) and 'metadata' in data:
+            logger.info(f"📊 Metadata: {data['metadata']}")
+        
         return imported_count
         
     except FileNotFoundError:
@@ -757,6 +789,9 @@ def import_markets_from_json(filename: str):
         raise
     except json.JSONDecodeError as e:
         logger.error(f"❌ Error de JSON: {str(e)}")
+        raise
+    except KeyError as e:
+        logger.error(f"❌ Faltan campos requeridos en JSON: {str(e)}")
         raise
     except Exception as e:
         db.session.rollback()
@@ -1602,5 +1637,6 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
