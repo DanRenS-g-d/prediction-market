@@ -1549,7 +1549,7 @@ def init_database():
         # Crear mercados desde JSON si no hay mercados
         if Market.query.count() == 0:
             try:
-                import_markets_from_json('markets_data.json')
+                import_markets_from_json('backend/data/markets.json')
             except FileNotFoundError:
                 # Fallback a inicialización por código
                 initialize_markets()
@@ -1578,7 +1578,7 @@ with app.app_context():
         # Verificar si hay mercados, si no, crear algunos
         if Market.query.count() == 0:
             try:
-                import_markets_from_json('markets_data.json')
+                import_markets_from_json('backend/data/markets.json')
             except FileNotFoundError:
                 # Fallback a inicialización por código
                 initialize_markets()
@@ -1602,4 +1602,5 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
