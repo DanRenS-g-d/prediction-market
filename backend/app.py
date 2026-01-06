@@ -1612,23 +1612,28 @@ with app.app_context():
         
         # Verificar si hay mercados, si no, crear algunos
         if Market.query.count() == 0:
-            # ✅ SOLUCIÓN: Ruta relativa al archivo actual
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            markets_file = os.path.join(current_dir, 'data', 'markets.json')
-            
             try:
+                # El Procfile hace "cd backend", así que estamos en backend/
+                # La ruta correcta es relativa a backend/
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                markets_file = os.path.join(current_dir, 'data', 'markets.json')
+                
                 logger.info(f"Intentando importar mercados desde {markets_file}")
                 import_markets_from_json(markets_file)
-            except FileNotFoundError:
+            except FileNotFoundError as e:
                 logger.error(f"❌ Archivo no encontrado: {markets_file}")
                 # Fallback a inicialización por código
+                logger.info("📝 Creando mercados de ejemplo por código...")
+                initialize_markets()
+            except Exception as e:
+                logger.error(f"❌ Error importando mercados: {str(e)}")
                 logger.info("📝 Creando mercados de ejemplo por código...")
                 initialize_markets()
             
             logger.info(f"✅ {Market.query.count()} mercados inicializados")
             
     except Exception as e:
-        logger.error(f"❌ Error inicializando base de datos: {str(e)}")
+        logger.error(f"❌ Error inicializando base de datos: {str(e)}", exc_info=True)
         # No lanzar excepción para no bloquear el inicio
 
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
@@ -1645,6 +1650,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
