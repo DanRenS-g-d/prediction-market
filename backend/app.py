@@ -385,10 +385,16 @@ class ResolutionBatch(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relaciones
-    market = db.relationship('Market', backref='resolution_batches')
-    resolver = db.relationship('User', foreign_keys=[resolved_by])
-    payments = db.relationship('ResolutionPayment', backref='batch', cascade='all, delete-orphan')
-    evidence = db.relationship('ResolutionEvidence', backref='resolution_batch', cascade='all, delete-orphan')
+market = db.relationship('Market', backref='resolution_batches')
+resolver = db.relationship('User', foreign_keys=[resolved_by])
+payments = db.relationship('ResolutionPayment', backref='batch', cascade='all, delete-orphan')
+evidence = db.relationship(
+    'ResolutionEvidence', 
+    backref='resolution_batch', 
+    cascade='all, delete-orphan',
+    overlaps="batch_evidence,batch"
+)
+cascade='all, delete-orphan')
     
     __table_args__ = (
         db.Index('idx_batches_market', 'market_id'),
@@ -493,10 +499,14 @@ class ResolutionEvidence(db.Model):
     verified_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     verified_at = db.Column(db.DateTime)
     
-    # Relaciones
-    market = db.relationship('Market', backref='evidence')
-    batch = db.relationship('ResolutionBatch', backref='batch_evidence')
-    verifier = db.relationship('User', foreign_keys=[verified_by])
+# Relaciones
+market = db.relationship('Market', backref='evidence')
+batch = db.relationship(
+    'ResolutionBatch', 
+    backref='batch_evidence',
+    overlaps="evidence,resolution_batch"
+)
+verifier = db.relationship('User', foreign_keys=[verified_by])
     
     __table_args__ = (
         db.Index('idx_evidence_market', 'market_id'),
@@ -1651,6 +1661,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
