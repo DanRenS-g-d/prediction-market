@@ -1613,20 +1613,21 @@ with app.app_context():
         # Verificar si hay mercados, si no, crear algunos
         if Market.query.count() == 0:
             try:
-                # El Procfile hace "cd backend", así que estamos en backend/
-                # La ruta correcta es relativa a backend/
+                # Railway ejecuta "cd backend", así que estamos en backend/
+                # La ruta correcta es relativa al directorio actual
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 markets_file = os.path.join(current_dir, 'data', 'markets.json')
                 
                 logger.info(f"Intentando importar mercados desde {markets_file}")
                 import_markets_from_json(markets_file)
+                
             except FileNotFoundError as e:
                 logger.error(f"❌ Archivo no encontrado: {markets_file}")
-                # Fallback a inicialización por código
                 logger.info("📝 Creando mercados de ejemplo por código...")
                 initialize_markets()
+                
             except Exception as e:
-                logger.error(f"❌ Error importando mercados: {str(e)}")
+                logger.error(f"❌ Error importando mercados: {str(e)}", exc_info=True)
                 logger.info("📝 Creando mercados de ejemplo por código...")
                 initialize_markets()
             
@@ -1650,6 +1651,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
