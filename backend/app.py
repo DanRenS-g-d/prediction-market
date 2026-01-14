@@ -15,6 +15,7 @@ from functools import wraps
 import json
 import secrets
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 # Cargar variables de entorno
 load_dotenv()
@@ -24,6 +25,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+logger.info("✅ CORS habilitado para todos los orígenes")
 
 # ==================== CONFIGURACIÓN DE BASE DE DATOS ====================
 # Configuración para Railway (PostgreSQL) o SQLite local
@@ -1660,6 +1664,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
