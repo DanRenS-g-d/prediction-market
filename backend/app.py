@@ -627,10 +627,12 @@ class BuyLimitManager:
             
             # 4. Límite de exposición (solo LONG)
             new_market_liquidity = market.total_liquidity + shares
-            user_exposure = new_total / new_market_liquidity if new_market_liquidity > 0 else 0
             
-            if user_exposure > app.config['LIMITS']['MAX_EXPOSURE_PERCENT']:
-                errors.append(f"Máxima exposición: {app.config['LIMITS']['MAX_EXPOSURE_PERCENT']*100:.1f}%")
+            # Solo verificar exposición si el mercado ya tiene liquidez
+            if new_market_liquidity > shares: #Si no es la primera compra
+                user_exposure = new_total / new_market_liquidity
+                if user_exposure > app.config['LIMITS']['MAX_EXPOSURE_PERCENT']:
+                    errors.append(f"Máxima exposición: {app.config['LIMITS']['MAX_EXPOSURE_PERCENT']*100:.1f}%")
             
             # 5. Límite total de posiciones LONG
             new_total_long = user.total_long_positions + shares
@@ -1664,6 +1666,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
