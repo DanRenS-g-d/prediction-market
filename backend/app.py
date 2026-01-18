@@ -1047,11 +1047,25 @@ def get_market_detail(market_id):
     try:
         market = Market.query.get_or_404(market_id)
         
+        # Extract category from slug
+        category = 'general'
+        if 'bitcoin' in market.slug or 'crypto' in market.slug.lower():
+            category = 'crypto'
+        elif 'presidente' in market.slug or 'cepeda' in market.slug:
+            category = 'politica'
+        elif 'inflacion' in market.slug or 'salario' in market.slug:
+            category = 'economia'
+        elif 'campeon' in market.slug or 'mundial' in market.slug or 'futbol' in market.slug:
+            category = 'deportes'
+        elif 'conflicto' in market.slug or 'venezuela' in market.slug or 'usa' in market.slug:
+            category = 'geopolitica'
+        
         market_data = {
             'id': market.id,
             'slug': market.slug,
             'title': market.title,
             'description': market.description,
+            'category': category,  # ADD THIS LINE
             'resolution_criteria': market.resolution_criteria,
             'sources': market.sources,
             'notes': market.notes,
@@ -1061,7 +1075,7 @@ def get_market_detail(market_id):
             'status': market.status,
             'close_time': market.close_time.isoformat() if market.close_time else None,
             'resolve_deadline': market.resolve_deadline.isoformat() if market.resolve_deadline else None,
-            'created_at': market.created_at.isoformat() if market.created_at else None,
+            'created_at': market.created_at.isoformat() if market.created_at else None,  # ADD THIS LINE
             'trading_type': 'BUY_ONLY',
             'statistics': {
                 'total_buy_trades': market.total_buy_trades,
@@ -1681,6 +1695,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
