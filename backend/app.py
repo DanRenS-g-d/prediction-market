@@ -989,15 +989,30 @@ def get_markets():
         
         markets_data = []
         for market in markets:
+            # Extract category from slug or notes
+            category = 'general'
+            if 'bitcoin' in market.slug or 'crypto' in market.slug.lower():
+                category = 'crypto'
+            elif 'presidente' in market.slug or 'cepeda' in market.slug:
+                category = 'politica'
+            elif 'inflacion' in market.slug or 'salario' in market.slug:
+                category = 'economia'
+            elif 'campeon' in market.slug or 'mundial' in market.slug or 'futbol' in market.slug:
+                category = 'deportes'
+            elif 'conflicto' in market.slug or 'venezuela' in market.slug or 'usa' in market.slug:
+                category = 'geopolitica'
+            
             markets_data.append({
                 'id': market.id,
                 'slug': market.slug,
                 'title': market.title,
                 'description': market.description,
+                'category': category,  # ADD THIS LINE
                 'price_yes': round(market.price_yes, 4),
                 'price_no': round(market.price_no, 4),
                 'total_liquidity': round(market.total_liquidity, 2),
                 'close_time': market.close_time.isoformat() if market.close_time else None,
+                'created_at': market.created_at.isoformat() if market.created_at else None,  # ADD THIS LINE
                 'status': 'OPEN',
                 'trading_type': 'BUY_ONLY',
                 'buy_limits': {
@@ -1666,6 +1681,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
