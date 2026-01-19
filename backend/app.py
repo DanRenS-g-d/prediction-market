@@ -113,6 +113,14 @@ class User(db.Model):
     
     role = db.Column(db.String(20), default='user', nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    # PREMIUM ACCOUNT FIELDS - ADD THESE
+    is_premium = db.Column(db.Boolean, default=False, nullable=False)
+    display_name = db.Column(db.String(100))  # Real name for premium users
+    profile_image_url = db.Column(db.String(500))  # Profile picture URL
+    bio = db.Column(db.Text)  # User bio/description
+    premium_since = db.Column(db.DateTime)  # When they became premium
+    credentials = db.Column(db.Text)  # Professional credentials
     
     # Solo posiciones LONG
     points_balance = db.Column(db.Float, default=100.00, nullable=False)
@@ -158,19 +166,32 @@ class User(db.Model):
         self.session_token = secrets.token_hex(32)
         return self.session_token
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'username': self.username,
-            'points_balance': self.points_balance,
-            'stats': {
-                'total_long_positions': self.total_long_positions,
-                'markets_traded_count': self.markets_traded_count,
-                'total_buy_trades': self.total_buy_trades_count,
-                'total_shares_bought': self.total_shares_bought
-            },
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
+    def to_dict(self, include_sensitive=False):
+    data = {
+        'id': self.id,
+        'username': self.username if self.is_premium else f'Anon#{self.id}',
+        'is_premium': self.is_premium,
+        'points_balance': self.points_balance,
+        'stats': {
+            'total_long_positions': self.total_long_positions,
+            'markets_traded_count': self.markets_traded_count,
+            'total_buy_trades': self.total_buy_trades_count,
+            'total_shares_bought': self.total_shares_bought
+        },
+        'created_at': self.created_at.isoformat() if self.created_at else None
+    }
+    
+    # Only show premium details if user is premium
+    if self.is_premium:
+        data.update({
+            'display_name': self.display_name,
+            'profile_image_url': self.profile_image_url,
+            'bio': self.bio,
+            'credentials': self.credentials,
+            'premium_since': self.premium_since.isoformat() if self.premium_since else None
+        })
+    
+    return data
 
 class Market(db.Model):
     __tablename__ = 'markets'
@@ -1492,6 +1513,52 @@ def get_user_limits(current_user):
         logger.error(f"Error getting limits: {str(e)}")
         return jsonify({'error': 'Error obteniendo límites'}), 500
 
+@app.route('/api/leaderboard', methods=['GET'])
+def get_leaderboard():
+    """Obtiene leaderboard de usuarios"""
+    try:
+        # Get top users by total profit/value
+        users = User.query.filter_by(is_active=True).all()
+        
+        leaderboard_data = []
+        for user in users:
+            # Calculate total portfolio value
+            positions = LongPosition.query.filter_by(user_id=user.id).all()
+            total_invested = sum(p.total_invested for p in positions)
+            total_current_value = sum(p.current_value for p in positions)
+            total_pl = total_current_value - total_invested
+            net_worth = user.points_balance + total_current_value
+            
+            leaderboard_data.append({
+                'user_id': user.id,
+                'username': user.username if user.is_premium else f'Anon#{user.id}',
+                'display_name': user.display_name if user.is_premium else None,
+                'profile_image_url': user.profile_image_url if user.is_premium else None,
+                'is_premium': user.is_premium,
+                'net_worth': round(net_worth, 2),
+                'total_pl': round(total_pl, 2),
+                'markets_traded': user.markets_traded_count,
+                'total_trades': user.total_buy_trades_count,
+                'credentials': user.credentials if user.is_premium else None
+            })
+        
+        # Sort by net worth
+        leaderboard_data.sort(key=lambda x: x['net_worth'], reverse=True)
+        
+        # Add rank
+        for i, entry in enumerate(leaderboard_data):
+            entry['rank'] = i + 1
+        
+        return jsonify({
+            'success': True,
+            'leaderboard': leaderboard_data[:100]  # Top 100
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting leaderboard: {str(e)}")
+        return jsonify({'error': 'Error obteniendo leaderboard'}), 500
+
+
 # ==================== ENDPOINTS DE SISTEMA ====================
 @app.route('/api/system/rules', methods=['GET'])
 def get_system_rules():
@@ -1752,6 +1819,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
