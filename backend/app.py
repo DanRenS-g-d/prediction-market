@@ -167,12 +167,12 @@ class User(db.Model):
         return self.session_token
     
     def to_dict(self, include_sensitive=False):
-    data = {
-        'id': self.id,
-        'username': self.username if self.is_premium else f'Anon#{self.id}',
-        'is_premium': self.is_premium,
-        'points_balance': self.points_balance,
-        'stats': {
+        data = {
+            'id': self.id,
+            'username': self.username if self.is_premium else f'Anon#{self.id}',
+            'is_premium': self.is_premium,
+            'points_balance': self.points_balance,
+            'stats': {
             'total_long_positions': self.total_long_positions,
             'markets_traded_count': self.markets_traded_count,
             'total_buy_trades': self.total_buy_trades_count,
@@ -1819,6 +1819,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
