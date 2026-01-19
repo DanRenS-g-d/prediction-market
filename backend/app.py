@@ -1095,7 +1095,64 @@ def get_market_detail(market_id):
     except Exception as e:
         logger.error(f"Error getting market detail: {str(e)}")
         return jsonify({'error': 'Error obteniendo mercado'}), 500
+        
+# Add this near the other market endpoints (after get_market_detail)
 
+@app.route('/api/market/<int:market_id>/price-history', methods=['GET'])
+def get_market_price_history(market_id):
+    """Obtiene historial de precios del mercado"""
+    try:
+        market = Market.query.get_or_404(market_id)
+        
+        # Get all trades for this market to reconstruct price history
+        trades = BuyTrade.query.filter_by(market_id=market_id)\
+            .order_by(BuyTrade.timestamp.asc())\
+            .all()
+        
+        price_history = []
+        
+        # Start with initial prices (50/50)
+        if trades:
+            price_history.append({
+                'timestamp': market.created_at.isoformat() if market.created_at else trades[0].timestamp.isoformat(),
+                'price_yes': 0.5,
+                'price_no': 0.5,
+                'liquidity': 0.0
+            })
+        
+        # Reconstruct prices from trades
+        q_yes = 0.0
+        q_no = 0.0
+        
+        for trade in trades:
+            if trade.outcome == 'YES':
+                q_yes += trade.shares
+            else:
+                q_no += trade.shares
+            
+            # Calculate price at this point
+            b = market.b
+            exp_yes = math.exp(q_yes / b)
+            exp_no = math.exp(q_no / b)
+            total = exp_yes + exp_no
+            
+            price_history.append({
+                'timestamp': trade.timestamp.isoformat(),
+                'price_yes': round(exp_yes / total if total > 0 else 0.5, 4),
+                'price_no': round(exp_no / total if total > 0 else 0.5, 4),
+                'liquidity': round(q_yes + q_no, 2)
+            })
+        
+        return jsonify({
+            'success': True,
+            'market_id': market_id,
+            'price_history': price_history
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting price history: {str(e)}")
+        return jsonify({'error': 'Error obteniendo historial de precios'}), 500
+        
 @app.route('/api/market/<int:market_id>/buy', methods=['POST'])
 @require_auth
 @transactional
@@ -1695,6 +1752,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
