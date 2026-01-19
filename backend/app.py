@@ -1551,12 +1551,10 @@ def get_user_limits(current_user):
 def get_leaderboard():
     """Obtiene leaderboard de usuarios"""
     try:
-        # Get top users by total profit/value
-        users = User.query.filter_by(is_active=True).all()
+        users = User.query.filter_by(is_active=True).limit(100).all()
         
         leaderboard_data = []
         for user in users:
-            # Calculate total portfolio value
             positions = LongPosition.query.filter_by(user_id=user.id).all()
             total_invested = sum(p.total_invested for p in positions)
             total_current_value = sum(p.current_value for p in positions)
@@ -1564,33 +1562,24 @@ def get_leaderboard():
             net_worth = user.points_balance + total_current_value
             
             leaderboard_data.append({
+                'rank': 0,  # Will set after sorting
                 'user_id': user.id,
-                'username': user.username if user.is_premium else f'Anon#{user.id}',
-                'display_name': user.display_name if user.is_premium else None,
-                'profile_image_url': user.profile_image_url if user.is_premium else None,
-                'is_premium': user.is_premium,
+                'username': user.username,
                 'net_worth': round(net_worth, 2),
                 'total_pl': round(total_pl, 2),
                 'markets_traded': user.markets_traded_count,
-                'total_trades': user.total_buy_trades_count,
-                'credentials': user.credentials if user.is_premium else None
+                'total_trades': user.total_buy_trades_count
             })
         
-        # Sort by net worth
         leaderboard_data.sort(key=lambda x: x['net_worth'], reverse=True)
-        
-        # Add rank
         for i, entry in enumerate(leaderboard_data):
             entry['rank'] = i + 1
         
-        return jsonify({
-            'success': True,
-            'leaderboard': leaderboard_data[:100]  # Top 100
-        })
+        return jsonify({'success': True, 'leaderboard': leaderboard_data})
         
     except Exception as e:
-        logger.error(f"Error getting leaderboard: {str(e)}")
-        return jsonify({'error': 'Error obteniendo leaderboard'}), 500
+        logger.error(f"Leaderboard error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 # ==================== ENDPOINTS DE SISTEMA ====================
@@ -1853,6 +1842,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
