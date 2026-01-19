@@ -594,6 +594,38 @@ def transactional(func):
             session.close()
     return wrapper
 
+# ==================== DECORADOR ADMIN ====================
+def require_admin(func):
+    """Decorador que requiere que el usuario sea admin"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Autenticación requerida'}), 401
+        
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(
+                token, 
+                app.config['JWT_SECRET_KEY'], 
+                algorithms=[app.config['JWT_ALGORITHM']]
+            )
+            user = User.query.filter_by(
+                id=payload['user_id'],
+                is_active=True,
+                role='admin'  # Solo admin
+            ).first()
+            
+            if not user:
+                return jsonify({'error': 'Acceso denegado. Requiere rol admin'}), 403
+            
+            return func(*args, **kwargs, current_user=user)
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expirado'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Token inválido'}), 401
+    return wrapper
+
 # ==================== SISTEMA DE LÍMITES (SOLO COMPRAS) ====================
 class BuyLimitManager:
     """Gestor de límites solo para COMPRAS"""
@@ -1821,6 +1853,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
