@@ -166,32 +166,34 @@ class User(db.Model):
         self.session_token = secrets.token_hex(32)
         return self.session_token
     
-    def to_dict(self, include_sensitive=False):
+def to_dict(self, include_sensitive=False):
+        """Devuelve dict del usuario con manejo de premium"""
         data = {
             'id': self.id,
             'username': self.username if self.is_premium else f'Anon#{self.id}',
             'is_premium': self.is_premium,
+            'role': self.role,  # Necesario para verificar admin en frontend
             'points_balance': self.points_balance,
             'stats': {
-            'total_long_positions': self.total_long_positions,
-            'markets_traded_count': self.markets_traded_count,
-            'total_buy_trades': self.total_buy_trades_count,
-            'total_shares_bought': self.total_shares_bought
-        },
-        'created_at': self.created_at.isoformat() if self.created_at else None
-    }
-    
-    # Only show premium details if user is premium
-    if self.is_premium:
-        data.update({
-            'display_name': self.display_name,
-            'profile_image_url': self.profile_image_url,
-            'bio': self.bio,
-            'credentials': self.credentials,
-            'premium_since': self.premium_since.isoformat() if self.premium_since else None
-        })
-    
-    return data
+                'total_long_positions': self.total_long_positions,
+                'markets_traded_count': self.markets_traded_count,
+                'total_buy_trades': self.total_buy_trades_count,
+                'total_shares_bought': self.total_shares_bought
+            },
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+        
+        # Solo mostrar detalles premium si el usuario es premium
+        if self.is_premium:
+            data.update({
+                'display_name': self.display_name,
+                'profile_image_url': self.profile_image_url,
+                'bio': self.bio,
+                'credentials': self.credentials,
+                'premium_since': self.premium_since.isoformat() if self.premium_since else None
+            })
+        
+        return data
 
 class Market(db.Model):
     __tablename__ = 'markets'
@@ -1819,6 +1821,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
