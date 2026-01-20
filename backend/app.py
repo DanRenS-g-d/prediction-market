@@ -1551,7 +1551,14 @@ def get_user_limits(current_user):
 def get_leaderboard():
     """Obtiene leaderboard de usuarios"""
     try:
-        users = User.query.filter_by(is_active=True).limit(100).all()
+        # Get users with only basic fields
+        users = db.session.query(
+            User.id,
+            User.username,
+            User.points_balance,
+            User.markets_traded_count,
+            User.total_buy_trades_count
+        ).filter(User.is_active == True).all()
         
         leaderboard_data = []
         for user in users:
@@ -1562,7 +1569,7 @@ def get_leaderboard():
             net_worth = user.points_balance + total_current_value
             
             leaderboard_data.append({
-                'rank': 0,  # Will set after sorting
+                'rank': 0,
                 'user_id': user.id,
                 'username': user.username,
                 'net_worth': round(net_worth, 2),
@@ -1580,7 +1587,6 @@ def get_leaderboard():
     except Exception as e:
         logger.error(f"Leaderboard error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 
 # ==================== ENDPOINTS DE SISTEMA ====================
 @app.route('/api/system/rules', methods=['GET'])
@@ -1842,6 +1848,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
