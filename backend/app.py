@@ -192,13 +192,13 @@ class User(db.Model):
             'credentials': self.credentials,
             'premium_since': self.premium_since.isoformat() if self.premium_since else None
         })
-        
+    
     return data
 
     # Incluir email solo si se solicita (para admin o perfil propio)
     if include_sensitive:
         data['email'] = self.email
-            
+    
     return data
 
 class Market(db.Model):
@@ -1854,6 +1854,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
