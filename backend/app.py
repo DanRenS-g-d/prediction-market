@@ -165,23 +165,23 @@ class User(db.Model):
         """Genera un token de sesión único"""
         self.session_token = secrets.token_hex(32)
         return self.session_token
-    
-def to_dict(self, include_sensitive=False):
-    """Devuelve dict del usuario con manejo de premium"""
-    data = {
-        'id': self.id,
-        'username': self.username if self.is_premium else f'Anon#{self.id}',
-        'is_premium': self.is_premium,
-        'role': self.role,  # Necesario para verificar admin en frontend
-        'points_balance': self.points_balance,
-        'stats': {
-            'total_long_positions': self.total_long_positions,
-            'markets_traded_count': self.markets_traded_count,
-            'total_buy_trades': self.total_buy_trades_count,
-            'total_shares_bought': self.total_shares_bought
-        },
-        'created_at': self.created_at.isoformat() if self.created_at else None
-    }
+        
+    def to_dict(self, include_sensitive=False):
+        """Devuelve dict del usuario con manejo de premium"""
+        data = {
+            'id': self.id,
+            'username': self.username if self.is_premium else f'Anon#{self.id}',
+            'is_premium': self.is_premium,
+            'role': self.role,  # Necesario para verificar admin en frontend
+            'points_balance': self.points_balance,
+            'stats': {
+                'total_long_positions': self.total_long_positions,
+                'markets_traded_count': self.markets_traded_count,
+                'total_buy_trades': self.total_buy_trades_count,
+                'total_shares_bought': self.total_shares_bought
+            },
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
         
     # Solo mostrar detalles premium si el usuario es premium
     if self.is_premium:
@@ -193,6 +193,12 @@ def to_dict(self, include_sensitive=False):
             'premium_since': self.premium_since.isoformat() if self.premium_since else None
         })
         
+    return data
+
+    # Incluir email solo si se solicita (para admin o perfil propio)
+    if include_sensitive:
+        data['email'] = self.email
+            
     return data
 
 class Market(db.Model):
@@ -1848,6 +1854,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
