@@ -166,24 +166,24 @@ class User(db.Model):
         self.session_token = secrets.token_hex(32)
         return self.session_token
         
-    def to_dict(self, include_sensitive=False):
-        """Devuelve dict del usuario con manejo de premium"""
-        data = {
-            'id': self.id,
-            'username': self.username if self.is_premium else f'Anon#{self.id}',
-            'is_premium': self.is_premium,
-            'role': self.role,  # Necesario para verificar admin en frontend
-            'points_balance': self.points_balance,
-            'stats': {
-                'total_long_positions': self.total_long_positions,
-                'markets_traded_count': self.markets_traded_count,
-                'total_buy_trades': self.total_buy_trades_count,
-                'total_shares_bought': self.total_shares_bought
-            },
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
-        
-    # Solo mostrar detalles premium si el usuario es premium
+def to_dict(self, include_sensitive=False):
+    """Devuelve dict del usuario con manejo de premium"""
+    data = {
+        'id': self.id,
+        'username': self.username if self.is_premium else f'Anon#{self.id}',
+        'is_premium': self.is_premium,
+        'role': self.role,
+        'points_balance': round(self.points_balance, 2),
+        'stats': {
+            'total_long_positions': round(self.total_long_positions, 2),
+            'markets_traded_count': self.markets_traded_count,
+            'total_buy_trades': self.total_buy_trades_count,
+            'total_shares_bought': round(self.total_shares_bought, 2)
+        },
+        'created_at': self.created_at.isoformat() if self.created_at else None
+    }
+    
+    # Solo mostrar detalles premium si el usuario es premium (8 espacios)
     if self.is_premium:
         data.update({
             'display_name': self.display_name,
@@ -193,13 +193,11 @@ class User(db.Model):
             'premium_since': self.premium_since.isoformat() if self.premium_since else None
         })
     
-    return data
-
-    # Incluir email solo si se solicita (para admin o perfil propio)
+    # Incluir email solo si se solicita (8 espacios)
     if include_sensitive:
         data['email'] = self.email
     
-    return data
+    return data  # (8 espacios - dentro de la función)
 
 class Market(db.Model):
     __tablename__ = 'markets'
@@ -1854,6 +1852,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
