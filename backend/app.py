@@ -103,6 +103,9 @@ app.config['LIMITS'] = {
 
 db = SQLAlchemy(app)
 
+from flask_migrate import Migrate
+migrate = Migrate(app, db)
+
 # ==================== MODELOS SIMPLIFICADOS ====================
 class User(db.Model):
     __tablename__ = 'users'
@@ -1789,6 +1792,31 @@ def init_database():
             except FileNotFoundError:
                 # Fallback a inicialización por código
                 initialize_markets()
+
+        
+        try:
+            inspector = db.inspect(db.engine)
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            
+            if 'is_premium' not in columns:
+                logger.info("🔄 Migrando columnas premium...")
+                sqls = [
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE NOT NULL",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100)",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url VARCHAR(500)",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_since TIMESTAMP",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS credentials TEXT"
+                ]
+                
+                for sql in sqls:
+                    db.session.execute(text(sql))
+                
+                db.session.commit()
+                logger.info("✅ Columnas premium migradas exitosamente")
+        except Exception as e:
+            logger.error(f"Error en migración automática: {str(e)}")
+        
         
         try:
             db.session.commit()
@@ -1852,6 +1880,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
