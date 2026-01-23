@@ -1838,6 +1838,29 @@ with app.app_context():
     try:
         db.create_all()
         logger.info("✅ Tablas de base de datos verificadas/creadas")
+
+        try:
+            inspector = db.inspect(db.engine)
+            columns = [col['name'] for col in inspector.get_columns('users')]
+
+            if 'is_premium' not in columns:
+                logger.info("🔄 Migrando columnas premium...")
+                sqls = [
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE NOT NULL",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100)",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url VARCHAR(500)",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_since TIMESTAMP",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS credentials TEXT"
+                ]
+                
+                for sql in sqls:
+                    db.session.execute(text(sql))
+                
+                db.session.commit()
+                logger.info("✅ Columnas premium migradas exitosamente")
+        except Exception as e:
+            logger.error(f"Error en migración automática: {str(e)}")
         
         # Verificar si hay mercados, si no, crear algunos
         if Market.query.count() == 0:
@@ -1880,6 +1903,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
