@@ -124,6 +124,19 @@ class User(db.Model):
     bio = db.Column(db.Text)  # User bio/description
     premium_since = db.Column(db.DateTime)  # When they became premium
     credentials = db.Column(db.Text)  # Professional credentials
+
+    # NEW PREMIUM FIELDS
+    niche = db.Column(db.String(200))  # "NBA drops", "EPL", "Tennis"
+    cta_links = db.Column(db.JSON)  # [{"label": "Join Telegram", "url": "..."}]
+    public_profile_slug = db.Column(db.String(100), unique=True, index=True)  # URL-friendly slug
+
+    # VERIFICATION AND WATERMARK
+    backlink_verified = db.Column(db.Boolean, default=False, nullable=False)
+    watermark_enabled = db.Column(db.Boolean, default=True, nullable=False)
+
+    # INVITATION SYSTEM
+    invite_code = db.Column(db.String(50))  # Code used to activate premium
+    invited_by = db.Column(db.Integer, db.ForeignKey('users.id'))  # Who invited them
     
     # Solo posiciones LONG
     points_balance = db.Column(db.Float, default=100.00, nullable=False)
@@ -170,7 +183,16 @@ class User(db.Model):
         return self.session_token
     
     def to_dict(self, include_sensitive=False):
-        """Devuelve dict del usuario con manejo de premium"""
+        """Devuelve dict del usuario con manejo de premium
+
+        Args:
+            include_sensitive: Incluir email y datos privados
+            public_view: Vista pública (ocultar usuarios anónimos completamente)
+        """
+        # En vista pública, no mostrar usuarios no-premium
+        if public_view and not self.is_premium:
+            return None
+            
         data = {
             'id': self.id,
             'username': self.username if self.is_premium else f'Anon#{self.id}',
@@ -193,13 +215,66 @@ class User(db.Model):
                 'profile_image_url': self.profile_image_url,
                 'bio': self.bio,
                 'credentials': self.credentials,
-                'premium_since': self.premium_since.isoformat() if self.premium_since else None
+                'premium_since': self.premium_since.isoformat() if self.premium_since else None,
+                'niche': self.niche,
+                'cta_links': self.cta_links or [],
+                'public_profile_slug': self.public_profile_slug,
+                'watermark_enabled': self.watermark_enabled
             })
             
         if include_sensitive:
             data['email'] = self.email
+            data['backlink_verified'] = self.backlink_verified
+            data['invite_code'] = self.invite_code
             
         return data  # (8 espacios - dentro de la función)
+
+class InviteCode(db.Model):
+    __tablename__ = 'invite_codes'
+    
+    code = db.Column(db.String(50), primary_key=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    max_uses = db.Column(db.Integer, default=1, nullable=False)
+    current_uses = db.Column(db.Integer, default=0, nullable=False)
+    expires_at = db.Column(db.DateTime)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship
+    creator = db.relationship('User', foreign_keys=[created_by], backref='created_invite_codes')
+    
+    def is_valid(self):
+        """Verifica si el código es válido para uso"""
+        if not self.is_active:
+            return False, "Código inactivo"
+        
+        if self.current_uses >= self.max_uses:
+            return False, "Código agotado"
+        
+        if self.expires_at and datetime.utcnow() > self.expires_at:
+            return False, "Código expirado"
+        
+        return True, "Código válido"
+    
+    def use_code(self):
+        """Incrementa el contador de usos"""
+        self.current_uses += 1
+        self.updated_at = datetime.utcnow()
+        
+        if self.current_uses >= self.max_uses:
+            self.is_active = False
+    
+    def to_dict(self):
+        return {
+            'code': self.code,
+            'max_uses': self.max_uses,
+            'current_uses': self.current_uses,
+            'is_active': self.is_active,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
 
 class Market(db.Model):
     __tablename__ = 'markets'
@@ -1555,40 +1630,73 @@ def get_user_limits(current_user):
 
 @app.route('/api/leaderboard', methods=['GET'])
 def get_leaderboard():
-    """Obtiene leaderboard de usuarios"""
+    """Obtiene leaderboard de usuarios PREMIUM ÚNICAMENTE"""
     try:
-        # Get users with only basic fields
+        # Parámetros de filtro
+        min_predictions = request.args.get('min_predictions', 10, type=int)
+        min_volume = request.args.get('min_volume', 100, type=float)
+        
+        # Get SOLO usuarios premium con mínimos
         users = db.session.query(
             User.id,
             User.username,
+            User.display_name,
+            User.profile_image_url,
+            User.public_profile_slug,
             User.points_balance,
             User.markets_traded_count,
             User.total_buy_trades_count
-        ).filter(User.is_active == True).all()
+        ).filter(
+            User.is_active == True,
+            User.is_premium == True,  # SOLO PREMIUM
+            User.total_buy_trades_count >= min_predictions  # Mínimo de predicciones
+        ).all()
         
         leaderboard_data = []
         for user in users:
             positions = LongPosition.query.filter_by(user_id=user.id).all()
             total_invested = sum(p.total_invested for p in positions)
+            
+            # Filtrar por volumen mínimo
+            if total_invested < min_volume:
+                continue
+            
             total_current_value = sum(p.current_value for p in positions)
             total_pl = total_current_value - total_invested
             net_worth = user.points_balance + total_current_value
             
             leaderboard_data.append({
-                'rank': 0,
+                'rank': 0,  # Se asignará después
                 'user_id': user.id,
                 'username': user.username,
+                'display_name': user.display_name,
+                'profile_image_url': user.profile_image_url,
+                'profile_slug': user.public_profile_slug,
                 'net_worth': round(net_worth, 2),
                 'total_pl': round(total_pl, 2),
+                'total_invested': round(total_invested, 2),
+                'roi': round((total_pl / total_invested * 100) if total_invested > 0 else 0, 2),
                 'markets_traded': user.markets_traded_count,
                 'total_trades': user.total_buy_trades_count
             })
         
+        # Ordenar por net worth
         leaderboard_data.sort(key=lambda x: x['net_worth'], reverse=True)
+        
+        # Asignar ranks
         for i, entry in enumerate(leaderboard_data):
             entry['rank'] = i + 1
         
-        return jsonify({'success': True, 'leaderboard': leaderboard_data})
+        return jsonify({
+            'success': True,
+            'leaderboard': leaderboard_data,
+            'filters': {
+                'min_predictions': min_predictions,
+                'min_volume': min_volume,
+                'total_qualified': len(leaderboard_data)
+            },
+            'note': 'Solo usuarios premium con mínimo de actividad'
+        })
         
     except Exception as e:
         logger.error(f"Leaderboard error: {str(e)}")
@@ -1748,6 +1856,330 @@ def trading_documentation():
         }
     })
 
+# ==================== ENDPOINTS DE PREMIUM Y INVITACIONES ====================
+
+@app.route('/api/auth/check-invite-code', methods=['POST'])
+def check_invite_code():
+    """Verifica si un código de invitación es válido (sin consumirlo)"""
+    try:
+        data = request.json
+        code = data.get('code', '').strip()
+        
+        if not code:
+            return jsonify({'error': 'Código requerido'}), 400
+        
+        invite = InviteCode.query.filter_by(code=code).first()
+        
+        if not invite:
+            return jsonify({
+                'valid': False,
+                'error': 'Código no encontrado'
+            }), 404
+        
+        is_valid, message = invite.is_valid()
+        
+        return jsonify({
+            'valid': is_valid,
+            'message': message,
+            'details': {
+                'max_uses': invite.max_uses,
+                'current_uses': invite.current_uses,
+                'expires_at': invite.expires_at.isoformat() if invite.expires_at else None
+            } if is_valid else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking invite code: {str(e)}")
+        return jsonify({'error': 'Error verificando código'}), 500
+
+
+@app.route('/api/auth/upgrade-to-premium', methods=['POST'])
+@require_auth
+def upgrade_to_premium(current_user):
+    """Actualiza cuenta de usuario a premium usando código de invitación"""
+    try:
+        data = request.json
+        code = data.get('invite_code', '').strip()
+        
+        # Validar que no sea ya premium
+        if current_user.is_premium:
+            return jsonify({'error': 'Ya eres usuario premium'}), 400
+        
+        if not code:
+            return jsonify({'error': 'Código de invitación requerido'}), 400
+        
+        # Buscar código
+        invite = InviteCode.query.filter_by(code=code).first()
+        
+        if not invite:
+            return jsonify({'error': 'Código inválido'}), 404
+        
+        # Validar código
+        is_valid, message = invite.is_valid()
+        if not is_valid:
+            return jsonify({'error': message}), 400
+        
+        # Generar slug único para perfil público
+        base_slug = current_user.username.lower().replace(' ', '-')
+        slug = base_slug
+        counter = 1
+        
+        while User.query.filter_by(public_profile_slug=slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+        
+        # Actualizar usuario a premium
+        current_user.is_premium = True
+        current_user.premium_since = datetime.utcnow()
+        current_user.invite_code = code
+        current_user.invited_by = invite.created_by
+        current_user.public_profile_slug = slug
+        current_user.watermark_enabled = True
+        current_user.backlink_verified = False
+        
+        # Usar código
+        invite.use_code()
+        
+        db.session.commit()
+        
+        logger.info(f"User {current_user.id} upgraded to premium with code {code}")
+        
+        return jsonify({
+            'success': True,
+            'message': '¡Felicitaciones! Ahora eres usuario premium',
+            'user': current_user.to_dict(include_sensitive=True),
+            'profile_url': f'/analyst/{slug}'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error upgrading to premium: {str(e)}")
+        return jsonify({'error': 'Error actualizando a premium'}), 500
+
+
+@app.route('/api/user/update-premium-profile', methods=['PUT'])
+@require_auth
+def update_premium_profile(current_user):
+    """Actualiza el perfil premium del usuario"""
+    try:
+        if not current_user.is_premium:
+            return jsonify({'error': 'Solo usuarios premium'}), 403
+        
+        data = request.json
+        
+        # Campos actualizables
+        if 'display_name' in data:
+            current_user.display_name = data['display_name'].strip()
+        
+        if 'bio' in data:
+            current_user.bio = data['bio'].strip()
+        
+        if 'credentials' in data:
+            current_user.credentials = data['credentials'].strip()
+        
+        if 'niche' in data:
+            current_user.niche = data['niche'].strip()
+        
+        if 'profile_image_url' in data:
+            current_user.profile_image_url = data['profile_image_url'].strip()
+        
+        if 'cta_links' in data:
+            # Validar formato de CTAs
+            cta_links = data['cta_links']
+            if isinstance(cta_links, list):
+                # Validar cada CTA tiene label y url
+                valid_ctas = []
+                for cta in cta_links:
+                    if isinstance(cta, dict) and 'label' in cta and 'url' in cta:
+                        valid_ctas.append({
+                            'label': cta['label'].strip(),
+                            'url': cta['url'].strip()
+                        })
+                current_user.cta_links = valid_ctas
+        
+        current_user.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"Premium profile updated for user {current_user.id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Perfil actualizado exitosamente',
+            'user': current_user.to_dict(include_sensitive=True)
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating premium profile: {str(e)}")
+        return jsonify({'error': 'Error actualizando perfil'}), 500
+
+
+@app.route('/api/analyst/<slug>', methods=['GET'])
+def get_analyst_public_profile(slug):
+    """Obtiene el perfil público de un analista premium"""
+    try:
+        user = User.query.filter_by(public_profile_slug=slug).first()
+        
+        if not user:
+            return jsonify({'error': 'Analista no encontrado'}), 404
+        
+        if not user.is_premium:
+            return jsonify({'error': 'Perfil no disponible'}), 403
+        
+        # Obtener posiciones y trades del usuario (para métricas básicas)
+        positions = LongPosition.query.filter_by(user_id=user.id).all()
+        trades = BuyTrade.query.filter_by(user_id=user.id).order_by(BuyTrade.timestamp.desc()).limit(10).all()
+        
+        total_invested = sum(p.total_invested for p in positions)
+        total_current_value = sum(p.current_value for p in positions)
+        total_pl = total_current_value - total_invested
+        
+        profile_data = {
+            'user': user.to_dict(),
+            'metrics': {
+                'total_predictions': user.total_buy_trades_count,
+                'markets_traded': user.markets_traded_count,
+                'total_invested': round(total_invested, 2),
+                'current_value': round(total_current_value, 2),
+                'profit_loss': round(total_pl, 2),
+                'roi': round((total_pl / total_invested * 100) if total_invested > 0 else 0, 2)
+            },
+            'recent_trades': [
+                {
+                    'market_title': t.market.title[:100] if t.market else 'N/A',
+                    'outcome': t.outcome,
+                    'shares': round(t.shares, 2),
+                    'cost': round(t.cost, 2),
+                    'timestamp': t.timestamp.isoformat() if t.timestamp else None
+                } for t in trades
+            ],
+            'watermark': {
+                'enabled': user.watermark_enabled,
+                'text': 'Track record verified by PredicciónCO' if user.watermark_enabled else None
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'profile': profile_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting analyst profile: {str(e)}")
+        return jsonify({'error': 'Error obteniendo perfil'}), 500
+
+
+# ==================== ENDPOINTS DE ADMIN PARA CÓDIGOS ====================
+
+@app.route('/api/admin/invite-codes', methods=['GET'])
+@require_admin
+def get_invite_codes(current_user):
+    """Obtiene lista de códigos de invitación (solo admin)"""
+    try:
+        codes = InviteCode.query.order_by(InviteCode.created_at.desc()).all()
+        
+        return jsonify({
+            'success': True,
+            'codes': [code.to_dict() for code in codes]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting invite codes: {str(e)}")
+        return jsonify({'error': 'Error obteniendo códigos'}), 500
+
+
+@app.route('/api/admin/generate-invite-code', methods=['POST'])
+@require_admin
+def generate_invite_code(current_user):
+    """Genera un nuevo código de invitación (solo admin)"""
+    try:
+        data = request.json
+        
+        # Generar código único si no se proporciona
+        code = data.get('code')
+        if not code:
+            code = secrets.token_urlsafe(8)
+        
+        # Verificar que no exista
+        existing = InviteCode.query.filter_by(code=code).first()
+        if existing:
+            return jsonify({'error': 'Código ya existe'}), 400
+        
+        max_uses = data.get('max_uses', 1)
+        expires_days = data.get('expires_days')
+        
+        expires_at = None
+        if expires_days:
+            expires_at = datetime.utcnow() + timedelta(days=expires_days)
+        
+        invite = InviteCode(
+            code=code,
+            created_by=current_user.id,
+            max_uses=max_uses,
+            expires_at=expires_at
+        )
+        
+        db.session.add(invite)
+        db.session.commit()
+        
+        logger.info(f"Admin {current_user.id} generated invite code: {code}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Código generado exitosamente',
+            'code': invite.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error generating invite code: {str(e)}")
+        return jsonify({'error': 'Error generando código'}), 500
+
+
+@app.route('/api/admin/upgrade-user/<int:user_id>', methods=['POST'])
+@require_admin
+def admin_upgrade_user(user_id, current_user):
+    """Actualiza usuario a premium sin código (solo admin)"""
+    try:
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({'error': 'Usuario no encontrado'}), 404
+        
+        if user.is_premium:
+            return jsonify({'error': 'Usuario ya es premium'}), 400
+        
+        # Generar slug único
+        base_slug = user.username.lower().replace(' ', '-')
+        slug = base_slug
+        counter = 1
+        
+        while User.query.filter_by(public_profile_slug=slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+        
+        # Actualizar a premium
+        user.is_premium = True
+        user.premium_since = datetime.utcnow()
+        user.public_profile_slug = slug
+        user.watermark_enabled = True
+        user.invited_by = current_user.id  # Admin que lo activó
+        
+        db.session.commit()
+        
+        logger.info(f"Admin {current_user.id} upgraded user {user_id} to premium")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Usuario {user.username} actualizado a premium',
+            'user': user.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in admin upgrade: {str(e)}")
+        return jsonify({'error': 'Error actualizando usuario'}), 500
+
 # ==================== INICIALIZACIÓN ====================
 def init_database():
     """Inicializa DB con reglas claras de solo compras"""
@@ -1902,6 +2334,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
