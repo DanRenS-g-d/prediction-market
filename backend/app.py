@@ -182,7 +182,7 @@ class User(db.Model):
         self.session_token = secrets.token_hex(32)
         return self.session_token
     
-    def to_dict(self, include_sensitive=False):
+    def to_dict(self, include_sensitive=False, public_view=False):
         """Devuelve dict del usuario con manejo de premium
 
         Args:
@@ -2334,6 +2334,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
