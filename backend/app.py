@@ -2320,6 +2320,83 @@ with app.app_context():
         logger.error(f"❌ Error inicializando base de datos: {str(e)}", exc_info=True)
         # No lanzar excepción para no bloquear el inicio
 
+# ==================== ADMIN - CREATE MARKET ====================
+@app.route('/api/admin/create-market', methods=['POST'])
+@require_admin
+def create_market(current_user):
+    """Crea un mercado nuevo (solo admin)"""
+    try:
+        data = request.json
+        
+        # Validar campos requeridos
+        required_fields = ['title', 'resolution_criteria', 'sources', 'close_time', 'resolve_deadline']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Campo requerido: {field}'}), 400
+        
+        # Generar slug único
+        base_slug = data['title'].lower()
+        base_slug = re.sub(r'[^\w\s-]', '', base_slug)
+        base_slug = re.sub(r'[-\s]+', '-', base_slug)
+        base_slug = base_slug[:80]
+        
+        slug = base_slug
+        counter = 1
+        while Market.query.filter_by(slug=slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+        
+        # Parsear fechas
+        from dateutil import parser as date_parser
+        close_time = date_parser.parse(data['close_time'])
+        resolve_deadline = date_parser.parse(data['resolve_deadline'])
+        
+        # Validar fechas
+        if close_time <= datetime.utcnow():
+            return jsonify({'error': 'Close time debe ser en el futuro'}), 400
+        
+        if resolve_deadline <= close_time:
+            return jsonify({'error': 'Resolve deadline debe ser después de close time'}), 400
+        
+        # Crear mercado
+        market = Market(
+            slug=slug,
+            title=data['title'].strip(),
+            description=data.get('description', '').strip(),
+            resolution_criteria=data['resolution_criteria'].strip(),
+            sources=data['sources'].strip(),
+            notes=data.get('notes', '').strip(),
+            category=data.get('category', 'general'),
+            b=float(data.get('b', 100.0)),
+            q_yes=0.0,
+            q_no=0.0,
+            close_time=close_time,
+            resolve_deadline=resolve_deadline,
+            max_shares_per_buy=float(data.get('max_shares_per_buy', 10000.0)),
+            max_long_position_per_user=float(data.get('max_long_position_per_user', 100000.0)),
+            status='open'
+        )
+        
+        db.session.add(market)
+        db.session.commit()
+        
+        logger.info(f"Market created by admin {current_user.id}: {market.slug}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Mercado creado exitosamente',
+            'market': {
+                'id': market.id,
+                'slug': market.slug,
+                'title': market.title
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating market: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error creando mercado: {str(e)}'}), 500
+
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
 if __name__ == '__main__':
     # Configurar puerto
@@ -2334,6 +2411,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
