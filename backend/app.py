@@ -276,6 +276,42 @@ class InviteCode(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
+# ==================== PROPOSED MARKETS MODEL ====================
+class ProposedMarket(db.Model):
+    __tablename__ = 'proposed_markets'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    title = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text)
+    category = db.Column(db.String(50), default='general')
+    resolution_criteria = db.Column(db.Text, nullable=False)
+    sources = db.Column(db.Text, nullable=False)
+    notes = db.Column(db.Text)
+    close_time = db.Column(db.DateTime, nullable=False)
+    resolve_deadline = db.Column(db.DateTime, nullable=False)
+    
+    # Configuración sugerida
+    b = db.Column(db.Numeric(10, 2), default=100.0)
+    max_shares_per_buy = db.Column(db.Numeric(15, 2), default=10000.0)
+    max_long_position_per_user = db.Column(db.Numeric(15, 2), default=100000.0)
+    
+    # Estado y gestión
+    status = db.Column(db.String(20), default='pending', nullable=False)
+    admin_notes = db.Column(db.Text)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    reviewed_at = db.Column(db.DateTime)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relaciones
+    user = db.relationship('User', foreign_keys=[user_id], backref='proposed_markets')
+    reviewer = db.relationship('User', foreign_keys=[reviewed_by])
+
+
+
 class Market(db.Model):
     __tablename__ = 'markets'
     id = db.Column(db.Integer, primary_key=True)
@@ -2397,6 +2433,191 @@ def create_market(current_user):
         logger.error(f"Error creating market: {str(e)}", exc_info=True)
         return jsonify({'error': f'Error creando mercado: {str(e)}'}), 500
 
+# ==================== USER - PROPOSE MARKET ====================
+@app.route('/api/market/propose', methods=['POST'])
+@require_auth
+def propose_market(current_user):
+    """Permite a cualquier usuario proponer un mercado"""
+    try:
+        data = request.json
+        
+        # Validar campos requeridos
+        required_fields = ['title', 'resolution_criteria', 'sources', 'close_time', 'resolve_deadline']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Campo requerido: {field}'}), 400
+        
+        # Parsear fechas
+        from dateutil import parser as date_parser
+        close_time = date_parser.parse(data['close_time'])
+        resolve_deadline = date_parser.parse(data['resolve_deadline'])
+        
+        # Validar fechas (con tolerancia)
+        if close_time <= datetime.utcnow() + timedelta(hours=-6):
+            return jsonify({'error': 'Close time debe ser en el futuro'}), 400
+        
+        if resolve_deadline <= close_time:
+            return jsonify({'error': 'Resolve deadline debe ser después de close time'}), 400
+        
+        # Crear propuesta
+        proposal = ProposedMarket(
+            user_id=current_user.id,
+            title=data['title'].strip(),
+            description=data.get('description', '').strip(),
+            category=data.get('category', 'general'),
+            resolution_criteria=data['resolution_criteria'].strip(),
+            sources=data['sources'].strip(),
+            notes=data.get('notes', '').strip(),
+            close_time=close_time,
+            resolve_deadline=resolve_deadline,
+            b=float(data.get('b', 100.0)),
+            max_shares_per_buy=float(data.get('max_shares_per_buy', 10000.0)),
+            max_long_position_per_user=float(data.get('max_long_position_per_user', 100000.0)),
+            status='pending'
+        )
+        
+        db.session.add(proposal)
+        db.session.commit()
+        
+        logger.info(f"Market proposed by user {current_user.id}: {proposal.title}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Propuesta enviada para revisión',
+            'proposal_id': proposal.id
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error proposing market: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error al proponer mercado: {str(e)}'}), 500
+
+# ==================== ADMIN - VIEW PROPOSALS ====================
+@app.route('/api/admin/proposals', methods=['GET'])
+@require_admin
+def get_proposals(current_user):
+    """Obtener todas las propuestas de mercados"""
+    try:
+        status_filter = request.args.get('status', 'pending')
+        
+        query = ProposedMarket.query
+        
+        if status_filter != 'all':
+            query = query.filter_by(status=status_filter)
+        
+        proposals = query.order_by(ProposedMarket.created_at.desc()).all()
+        
+        proposals_data = []
+        for p in proposals:
+            proposals_data.append({
+                'id': p.id,
+                'user_id': p.user_id,
+                'username': p.user.username,
+                'title': p.title,
+                'description': p.description,
+                'category': p.category,
+                'resolution_criteria': p.resolution_criteria,
+                'sources': p.sources,
+                'notes': p.notes,
+                'close_time': p.close_time.isoformat() if p.close_time else None,
+                'resolve_deadline': p.resolve_deadline.isoformat() if p.resolve_deadline else None,
+                'b': float(p.b) if p.b else 100.0,
+                'max_shares_per_buy': float(p.max_shares_per_buy) if p.max_shares_per_buy else 10000.0,
+                'max_long_position_per_user': float(p.max_long_position_per_user) if p.max_long_position_per_user else 100000.0,
+                'status': p.status,
+                'admin_notes': p.admin_notes,
+                'reviewed_by': p.reviewed_by,
+                'reviewed_at': p.reviewed_at.isoformat() if p.reviewed_at else None,
+                'created_at': p.created_at.isoformat() if p.created_at else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'proposals': proposals_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting proposals: {str(e)}", exc_info=True)
+        return jsonify({'error': 'Error cargando propuestas'}), 500
+
+# ==================== ADMIN - APPROVE/REJECT PROPOSAL ====================
+@app.route('/api/admin/proposals/<int:proposal_id>/review', methods=['POST'])
+@require_admin
+def review_proposal(current_user, proposal_id):
+    """Aprobar o rechazar una propuesta"""
+    try:
+        data = request.json
+        action = data.get('action')  # 'approve' or 'reject'
+        admin_notes = data.get('admin_notes', '')
+        
+        if action not in ['approve', 'reject']:
+            return jsonify({'error': 'Acción inválida'}), 400
+        
+        proposal = ProposedMarket.query.get(proposal_id)
+        if not proposal:
+            return jsonify({'error': 'Propuesta no encontrada'}), 404
+        
+        if proposal.status != 'pending':
+            return jsonify({'error': 'Esta propuesta ya fue revisada'}), 400
+        
+        if action == 'approve':
+            # Crear el mercado
+            slug = proposal.title.lower()
+            slug = re.sub(r'[^\w\s-]', '', slug)
+            slug = re.sub(r'[-\s]+', '-', slug)
+            slug = slug[:80]
+            
+            # Asegurar slug único
+            base_slug = slug
+            counter = 1
+            while Market.query.filter_by(slug=slug).first():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            
+            market = Market(
+                slug=slug,
+                title=proposal.title,
+                description=proposal.description,
+                resolution_criteria=proposal.resolution_criteria,
+                sources=proposal.sources,
+                notes=proposal.notes,
+                category=proposal.category,
+                b=float(proposal.b),
+                q_yes=0.0,
+                q_no=0.0,
+                close_time=proposal.close_time,
+                resolve_deadline=proposal.resolve_deadline,
+                max_shares_per_buy=float(proposal.max_shares_per_buy),
+                max_long_position_per_user=float(proposal.max_long_position_per_user),
+                status='open'
+            )
+            
+            db.session.add(market)
+            proposal.status = 'approved'
+            message = f'Propuesta aprobada. Mercado creado: {market.title}'
+            
+        else:  # reject
+            proposal.status = 'rejected'
+            message = 'Propuesta rechazada'
+        
+        proposal.admin_notes = admin_notes
+        proposal.reviewed_by = current_user.id
+        proposal.reviewed_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        logger.info(f"Proposal {proposal_id} {action}ed by admin {current_user.id}")
+        
+        return jsonify({
+            'success': True,
+            'message': message
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error reviewing proposal: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error: {str(e)}'}), 500
+
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
 if __name__ == '__main__':
     # Configurar puerto
@@ -2411,6 +2632,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
