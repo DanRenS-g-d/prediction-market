@@ -318,57 +318,46 @@ class ProposedMarket(db.Model):
     user = db.relationship('User', foreign_keys=[user_id], backref='proposed_markets')
     reviewer = db.relationship('User', foreign_keys=[reviewed_by])
 
-
-
 class Market(db.Model):
     __tablename__ = 'markets'
     id = db.Column(db.Integer, primary_key=True)
     slug = db.Column(db.String(100), unique=True, nullable=False)
     title = db.Column(db.String(500), nullable=False)
     description = db.Column(db.Text)
-    category = db.Column(db.String(50), nullable=False, default='general')  # <- AGREGA ESTO
+    category = db.Column(db.String(50), nullable=False, default='general')
     resolution_criteria = db.Column(db.Text, nullable=False)
     sources = db.Column(db.Text, nullable=False)
     notes = db.Column(db.Text)
-    b = db.Column(db.Float, default=100.0)
-    q_yes = db.Column(db.Float, default=0.0)
-    q_no = db.Column(db.Float, default=0.0)
-    close_time = db.Column(db.DateTime, nullable=False)
-    resolve_deadline = db.Column(db.DateTime, nullable=False)
-    max_shares_per_buy = db.Column(db.Float, default=10000.0)
-    max_long_position_per_user = db.Column(db.Float, default=100000.0)
-    status = db.Column(db.String(20), default='open')
-    resolved_outcome = db.Column(db.String(10))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Parámetros LMSR (solo para COMPRAS)
     b = db.Column(db.Float, default=100.0, nullable=False)
-    q_yes = db.Column(db.Float, default=0.0, nullable=False)  # COMPRAS de YES
-    q_no = db.Column(db.Float, default=0.0, nullable=False)   # COMPRAS de NO
+    q_yes = db.Column(db.Float, default=0.0, nullable=False)
+    q_no = db.Column(db.Float, default=0.0, nullable=False)
+    
+    # Fechas
+    close_time = db.Column(db.DateTime, nullable=False, index=True)
+    resolve_deadline = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Límites (solo para COMPRAS)
+    max_shares_per_buy = db.Column(db.Float, default=10000.0)
+    max_long_position_per_user = db.Column(db.Float, default=100000.0)
+    
+    # Status y resolución
+    status = db.Column(db.String(20), default='open', nullable=False, index=True)
+    resolved_outcome = db.Column(db.String(10))
+    result = db.Column(db.String(10), index=True)
+    resolution_time = db.Column(db.DateTime, index=True)
+    resolved_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    resolution_evidence_url = db.Column(db.Text)
+    resolution_notes = db.Column(db.Text)
     
     # Estadísticas (solo COMPRAS)
     total_buy_trades = db.Column(db.Integer, default=0, nullable=False)
     unique_buyers = db.Column(db.Integer, default=0, nullable=False)
     
-    status = db.Column(db.String(20), default='open', nullable=False, index=True)
-    result = db.Column(db.String(10), index=True)
-    resolution_time = db.Column(db.DateTime, index=True)
-    
-    close_time = db.Column(db.DateTime, nullable=False, index=True)
-    resolve_deadline = db.Column(db.DateTime, nullable=False)
-    
-    resolved_by = db.Column(db.Integer, db.ForeignKey('users.id'))
-    resolution_evidence_url = db.Column(db.Text)
-    resolution_notes = db.Column(db.Text)
-    
-    # Límites específicos (solo para COMPRAS)
-    max_long_position_per_user = db.Column(db.Float, default=100000.0)
-    max_shares_per_buy = db.Column(db.Float, default=10000.0)
-    
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Solo posiciones LONG
+    # Relaciones
     long_positions = db.relationship('LongPosition', backref='market', lazy=True, cascade="all, delete-orphan")
     buy_trades = db.relationship('BuyTrade', backref='market', lazy=True, cascade="all, delete-orphan")
     
@@ -382,11 +371,9 @@ class Market(db.Model):
     
     @property
     def total_liquidity(self):
-        """Liquidez total (solo posiciones LONG)"""
         return self.q_yes + self.q_no
     
     def _calculate_price(self, outcome):
-        """Calcula precio para COMPRA"""
         try:
             if outcome == 'YES':
                 exp = math.exp(self.q_yes / self.b)
@@ -2651,6 +2638,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
