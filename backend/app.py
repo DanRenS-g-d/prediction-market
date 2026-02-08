@@ -284,12 +284,20 @@ class ProposedMarket(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     title = db.Column(db.String(500), nullable=False)
     description = db.Column(db.Text)
-    category = db.Column(db.String(50), default='general')
+    category = db.Column(db.String(50), nullable=False, default='general')  # <- AGREGA ESTO
     resolution_criteria = db.Column(db.Text, nullable=False)
     sources = db.Column(db.Text, nullable=False)
     notes = db.Column(db.Text)
     close_time = db.Column(db.DateTime, nullable=False)
     resolve_deadline = db.Column(db.DateTime, nullable=False)
+    b = db.Column(db.Float, default=100.0)
+    max_shares_per_buy = db.Column(db.Float, default=10000.0)
+    max_long_position_per_user = db.Column(db.Float, default=100000.0)
+    status = db.Column(db.String(20), nullable=False, default='pending')  # pending, approved, rejected
+    admin_notes = db.Column(db.Text)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    reviewed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Configuración sugerida
     b = db.Column(db.Numeric(10, 2), default=100.0)
@@ -2632,6 +2640,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
