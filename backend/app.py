@@ -323,12 +323,23 @@ class ProposedMarket(db.Model):
 class Market(db.Model):
     __tablename__ = 'markets'
     id = db.Column(db.Integer, primary_key=True)
-    slug = db.Column(db.String(100), unique=True, nullable=False, index=True)
-    title = db.Column(db.Text, nullable=False)
+    slug = db.Column(db.String(100), unique=True, nullable=False)
+    title = db.Column(db.String(500), nullable=False)
     description = db.Column(db.Text)
+    category = db.Column(db.String(50), nullable=False, default='general')  # <- AGREGA ESTO
     resolution_criteria = db.Column(db.Text, nullable=False)
     sources = db.Column(db.Text, nullable=False)
     notes = db.Column(db.Text)
+    b = db.Column(db.Float, default=100.0)
+    q_yes = db.Column(db.Float, default=0.0)
+    q_no = db.Column(db.Float, default=0.0)
+    close_time = db.Column(db.DateTime, nullable=False)
+    resolve_deadline = db.Column(db.DateTime, nullable=False)
+    max_shares_per_buy = db.Column(db.Float, default=10000.0)
+    max_long_position_per_user = db.Column(db.Float, default=100000.0)
+    status = db.Column(db.String(20), default='open')
+    resolved_outcome = db.Column(db.String(10))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Parámetros LMSR (solo para COMPRAS)
     b = db.Column(db.Float, default=100.0, nullable=False)
@@ -2640,6 +2651,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
