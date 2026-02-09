@@ -2512,7 +2512,7 @@ def propose_market(current_user):
 
 # ==================== USER - GET MY PROPOSALS ====================
 @app.route('/api/user/my-proposals', methods=['GET'])
-@token_required
+@require_auth
 def get_my_proposals(current_user):
     """Obtener las propuestas del usuario actual"""
     try:
@@ -2825,6 +2825,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
