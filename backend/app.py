@@ -2498,6 +2498,48 @@ def propose_market(current_user):
         logger.error(f"Error proposing market: {str(e)}", exc_info=True)
         return jsonify({'error': f'Error al proponer mercado: {str(e)}'}), 500
 
+# ==================== USER - GET MY PROPOSALS ====================
+@app.route('/api/user/my-proposals', methods=['GET'])
+@token_required
+def get_my_proposals(current_user):
+    """Obtener las propuestas del usuario actual"""
+    try:
+        proposals = ProposedMarket.query.filter_by(
+            user_id=current_user.id
+        ).order_by(ProposedMarket.created_at.desc()).all()
+        
+        proposals_data = []
+        for p in proposals:
+            # Obtener info del admin que lo revisó
+            reviewed_by_username = None
+            if p.reviewed_by:
+                reviewer = User.query.get(p.reviewed_by)
+                if reviewer:
+                    reviewed_by_username = reviewer.username
+            
+            proposals_data.append({
+                'id': p.id,
+                'title': p.title,
+                'description': p.description,
+                'category': p.category,
+                'status': p.status,
+                'admin_notes': p.admin_notes,
+                'reviewed_by': reviewed_by_username,
+                'reviewed_at': p.reviewed_at.isoformat() if p.reviewed_at else None,
+                'created_at': p.created_at.isoformat(),
+                'close_time': p.close_time.isoformat(),
+                'resolve_deadline': p.resolve_deadline.isoformat()
+            })
+        
+        return jsonify({
+            'success': True,
+            'proposals': proposals_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting user proposals: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error: {str(e)}'}), 500
+
 # ==================== ADMIN - VIEW PROPOSALS ====================
 @app.route('/api/admin/proposals', methods=['GET'])
 @require_admin
@@ -2771,6 +2813,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
