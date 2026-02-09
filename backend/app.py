@@ -2569,6 +2569,12 @@ def get_proposals(current_user):
         
         proposals_data = []
         for p in proposals:
+            reviewed_by_username = None
+            if p.reviewed_by:
+                reviewer = User.query.get(p.reviewed_by)
+                if reviewer:
+                    reviewed_by_username = reviewer.username
+                     
             proposals_data.append({
                 'id': p.id,
                 'user_id': p.user_id,
@@ -2587,6 +2593,7 @@ def get_proposals(current_user):
                 'status': p.status,
                 'admin_notes': p.admin_notes,
                 'reviewed_by': p.reviewed_by,
+                'reviewed_by_username': reviewed_by_username, 
                 'reviewed_at': p.reviewed_at.isoformat() if p.reviewed_at else None,
                 'created_at': p.created_at.isoformat() if p.created_at else None
             })
@@ -2825,6 +2832,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
