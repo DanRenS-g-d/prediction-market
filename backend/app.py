@@ -2624,6 +2624,139 @@ def review_proposal(current_user, proposal_id):
         logger.error(f"Error reviewing proposal: {str(e)}", exc_info=True)
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
+# ==================== ADMIN - RESOLVE MARKET ====================
+@app.route('/api/admin/markets/<int:market_id>/resolve', methods=['POST'])
+@require_admin
+def resolve_market(current_user, market_id):
+    """Resolver un mercado y pagar a los ganadores"""
+    try:
+        data = request.json
+        outcome = data.get('outcome')  # 'YES' or 'NO'
+        resolution_notes = data.get('resolution_notes', '')
+        resolution_evidence_url = data.get('resolution_evidence_url', '')
+        
+        if outcome not in ['YES', 'NO']:
+            return jsonify({'error': 'Resultado debe ser YES o NO'}), 400
+        
+        market = Market.query.get(market_id)
+        if not market:
+            return jsonify({'error': 'Mercado no encontrado'}), 404
+        
+        if market.status == 'resolved':
+            return jsonify({'error': 'Este mercado ya fue resuelto'}), 400
+        
+        # Obtener todas las posiciones en este mercado
+        positions = LongPosition.query.filter_by(market_id=market_id).all()
+        
+        total_paid = 0
+        winners_count = 0
+        
+        for position in positions:
+            user = User.query.get(position.user_id)
+            if not user:
+                continue
+            
+            # Calcular ganancia según el outcome
+            if outcome == 'YES':
+                payout = position.shares_yes  # Cada share YES vale $1
+                position.final_value_yes = payout
+                position.final_value_no = 0
+            else:  # NO
+                payout = position.shares_no  # Cada share NO vale $1
+                position.final_value_yes = 0
+                position.final_value_no = payout
+            
+            if payout > 0:
+                # Pagar al usuario
+                user.points_balance += payout
+                total_paid += payout
+                winners_count += 1
+                logger.info(f"Paid {payout} to user {user.id} for market {market_id}")
+        
+        # Actualizar el mercado
+        market.status = 'resolved'
+        market.result = outcome
+        market.resolved_outcome = outcome
+        market.resolution_time = datetime.utcnow()
+        market.resolved_by = current_user.id
+        market.resolution_notes = resolution_notes
+        market.resolution_evidence_url = resolution_evidence_url
+        
+        db.session.commit()
+        
+        logger.info(f"Market {market_id} resolved as {outcome} by admin {current_user.id}. Paid {total_paid} to {winners_count} users.")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Mercado resuelto como {outcome}. {winners_count} usuarios recibieron {total_paid:.2f} puntos.',
+            'market': {
+                'id': market.id,
+                'title': market.title,
+                'result': market.result,
+                'total_paid': total_paid,
+                'winners_count': winners_count
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error resolving market: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error: {str(e)}'}), 500
+
+
+# ==================== ADMIN - GET RESOLVABLE MARKETS ====================
+@app.route('/api/admin/markets/resolvable', methods=['GET'])
+@require_admin
+def get_resolvable_markets(current_user):
+    """Obtener mercados listos para resolver"""
+    try:
+        # Mercados que:
+        # 1. Están abiertos (status='open')
+        # 2. Ya pasaron su close_time
+        # 3. No están resueltos
+        
+        now = datetime.utcnow()
+        
+        markets = Market.query.filter(
+            Market.status == 'open',
+            Market.close_time <= now
+        ).order_by(Market.resolve_deadline.asc()).all()
+        
+        markets_data = []
+        for m in markets:
+            # Calcular stats
+            positions = LongPosition.query.filter_by(market_id=m.id).all()
+            total_yes = sum(p.shares_yes for p in positions)
+            total_no = sum(p.shares_no for p in positions)
+            total_value = total_yes + total_no
+            
+            markets_data.append({
+                'id': m.id,
+                'slug': m.slug,
+                'title': m.title,
+                'description': m.description,
+                'category': m.category,
+                'close_time': m.close_time.isoformat(),
+                'resolve_deadline': m.resolve_deadline.isoformat(),
+                'price_yes': m.price_yes,
+                'price_no': m.price_no,
+                'total_yes_shares': total_yes,
+                'total_no_shares': total_no,
+                'total_value': total_value,
+                'total_positions': len(positions),
+                'resolution_criteria': m.resolution_criteria,
+                'sources': m.sources
+            })
+        
+        return jsonify({
+            'success': True,
+            'markets': markets_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting resolvable markets: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error: {str(e)}'}), 500
+
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
 if __name__ == '__main__':
     # Configurar puerto
@@ -2638,6 +2771,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
