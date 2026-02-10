@@ -234,7 +234,8 @@ class User(db.Model):
                 'niche': self.niche,
                 'cta_links': self.cta_links or [],
                 'public_profile_slug': self.public_profile_slug,
-                'watermark_enabled': self.watermark_enabled
+                'watermark_enabled': self.watermark_enabled,
+                'payment_info': self.payment_info
             })
             
         if include_sensitive:
@@ -2070,6 +2071,44 @@ def update_premium_profile(current_user):
         logger.error(f"Error updating premium profile: {str(e)}")
         return jsonify({'error': 'Error actualizando perfil'}), 500
 
+@app.route('/api/user/update-payment-info', methods=['PUT'])
+@require_auth
+def update_payment_info(current_user):
+    """Usuario actualiza su información de pago VOLUNTARIA y NO VERIFICADA"""
+    try:
+         if not current_user.is_premium:
+              return jsonify({'error': 'Solo usuarios premium'}), 403
+
+         data = request.json
+
+         # Validar estructura básica (no validamos contenido)
+         payment_info = data.get('payment_info')
+
+         if payment_info:
+              # Estructura esperada: {'type': 'wallet/paypal/etc', 'address': '...', 'label': '...'}
+              if not isinstance(payment_info, dict):
+                   return jsonify({'error': 'Formato inválido'}), 400
+
+              # Límite de seguridad (no permitir objetos masivos)
+              if len(str(payment_info)) > 500:
+                   return jsonify({'error': 'Información demasiado larga'}), 400
+
+          current_user.payment_info = payment_info
+          current_user.updated_at = datetime.utcnow()
+          db.session.commit()
+
+          logger.info(f"Payment info updated for user {current_user.id} (user-provided, unverified)")
+
+          return jsonify({
+              'success': True,
+              'message': 'Información de pago actualizada (no verificada)',
+              'user': current_user.to_dict(include_sensitive=True)
+          })
+
+    except Exception as e:
+         db.session.rollback()
+         logger.error(f"Error updating payment info: {str(e)}")
+         return jsonify({'error': 'Error actualizando información'}), 500
 
 @app.route('/api/analyst/<slug>', methods=['GET'])
 def get_analyst_public_profile(slug):
@@ -2835,6 +2874,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
