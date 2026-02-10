@@ -167,7 +167,10 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     session_token = db.Column(db.String(64), unique=True, index=True)
-    
+
+    # WALLET/DONATIONS (user-provided, unverified)
+    payment_info = db.Column(db.JSON)
+     
     # Solo posiciones LONG
     long_positions = db.relationship('LongPosition', backref='user', lazy=True, cascade="all, delete-orphan")
     buy_trades = db.relationship('BuyTrade', backref='user', lazy=True, cascade="all, delete-orphan")
@@ -2832,6 +2835,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
