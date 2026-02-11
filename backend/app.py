@@ -3029,6 +3029,374 @@ def get_resolvable_markets(current_user):
         logger.error(f"Error getting resolvable markets: {str(e)}", exc_info=True)
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
+# ==================== COMMITMENT EVENTS ====================
+
+@app.route('/api/commitment/create', methods=['POST'])
+@require_auth
+def create_commitment_event(current_user):
+    """Crear un nuevo evento de compromiso"""
+    try:
+        data = request.json
+        
+        # Validaciones básicas
+        required_fields = ['subject_username', 'title', 'description', 'commitment_type', 
+                          'resolution_criteria', 'commitment_date', 'deadline']
+        
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return jsonify({'error': f'Campo requerido: {field}'}), 400
+        
+        # Buscar usuario sujeto
+        subject_user = User.query.filter_by(username=data['subject_username']).first()
+        if not subject_user:
+            return jsonify({'error': f'Usuario {data["subject_username"]} no encontrado'}), 404
+        
+        # No permitir auto-compromisos
+        if subject_user.id == current_user.id:
+            return jsonify({'error': 'No puedes crear un compromiso sobre ti mismo'}), 400
+        
+        # Validar fechas
+        try:
+            commitment_date = datetime.fromisoformat(data['commitment_date'].replace('Z', '+00:00'))
+            deadline = datetime.fromisoformat(data['deadline'].replace('Z', '+00:00'))
+        except:
+            return jsonify({'error': 'Formato de fecha inválido'}), 400
+        
+        if deadline <= datetime.utcnow():
+            return jsonify({'error': 'La fecha límite debe ser futura'}), 400
+        
+        if deadline <= commitment_date:
+            return jsonify({'error': 'La fecha límite debe ser posterior a la fecha del compromiso'}), 400
+        
+        # Validar tipo de compromiso
+        valid_types = ['loan', 'bet', 'contract', 'promise', 'other']
+        if data['commitment_type'] not in valid_types:
+            return jsonify({'error': 'Tipo de compromiso inválido'}), 400
+        
+        # Crear evento
+        event = CommitmentEvent(
+            subject_user_id=subject_user.id,
+            creator_user_id=current_user.id,
+            title=data['title'].strip(),
+            description=data['description'].strip(),
+            commitment_type=data['commitment_type'],
+            resolution_criteria=data['resolution_criteria'].strip(),
+            evidence_required=data.get('evidence_required', '').strip(),
+            commitment_date=commitment_date,
+            deadline=deadline,
+            is_public=data.get('is_public', True)
+        )
+        
+        db.session.add(event)
+        db.session.commit()
+        
+        logger.info(f"Commitment event created: {event.id} by user {current_user.id} about user {subject_user.id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Evento de compromiso creado',
+            'event': event.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating commitment event: {str(e)}")
+        return jsonify({'error': 'Error creando evento'}), 500
+
+
+@app.route('/api/commitment/events', methods=['GET'])
+def get_commitment_events():
+    """Obtener lista de eventos de compromiso públicos"""
+    try:
+        status_filter = request.args.get('status', 'active')  # active, resolved, all
+        user_id = request.args.get('user_id')  # Filtrar por usuario específico
+        
+        query = CommitmentEvent.query.filter_by(is_public=True)
+        
+        if status_filter != 'all':
+            query = query.filter_by(status=status_filter)
+        
+        if user_id:
+            query = query.filter_by(subject_user_id=int(user_id))
+        
+        events = query.order_by(CommitmentEvent.created_at.desc()).all()
+        
+        return jsonify({
+            'success': True,
+            'events': [event.to_dict() for event in events]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching commitment events: {str(e)}")
+        return jsonify({'error': 'Error obteniendo eventos'}), 500
+
+
+@app.route('/api/commitment/<int:event_id>', methods=['GET'])
+def get_commitment_event(event_id):
+    """Obtener detalles de un evento específico"""
+    try:
+        event = CommitmentEvent.query.get(event_id)
+        
+        if not event:
+            return jsonify({'error': 'Evento no encontrado'}), 404
+        
+        if not event.is_public:
+            return jsonify({'error': 'Evento privado'}), 403
+        
+        # Incluir predicciones
+        predictions = CommitmentPrediction.query.filter_by(event_id=event_id).all()
+        
+        return jsonify({
+            'success': True,
+            'event': event.to_dict(),
+            'predictions': [p.to_dict() for p in predictions]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching commitment event: {str(e)}")
+        return jsonify({'error': 'Error obteniendo evento'}), 500
+
+
+@app.route('/api/commitment/<int:event_id>/predict', methods=['POST'])
+@require_auth
+def predict_commitment(current_user, event_id):
+    """Hacer una predicción sobre si cumplirá el compromiso"""
+    try:
+        event = CommitmentEvent.query.get(event_id)
+        
+        if not event:
+            return jsonify({'error': 'Evento no encontrado'}), 404
+        
+        if event.status != 'active':
+            return jsonify({'error': 'Solo puedes predecir en eventos activos'}), 400
+        
+        # No permitir predecir si eres parte del evento
+        if current_user.id in [event.subject_user_id, event.creator_user_id]:
+            return jsonify({'error': 'No puedes predecir en un evento del que eres parte'}), 400
+        
+        data = request.json
+        prediction_value = data.get('prediction')
+        
+        if prediction_value not in ['fulfilled', 'not_fulfilled']:
+            return jsonify({'error': 'Predicción inválida'}), 400
+        
+        # Verificar si ya predijo
+        existing = CommitmentPrediction.query.filter_by(
+            event_id=event_id,
+            user_id=current_user.id
+        ).first()
+        
+        if existing:
+            # Actualizar predicción existente
+            existing.prediction = prediction_value
+            existing.confidence = data.get('confidence')
+            existing.reasoning = data.get('reasoning', '').strip()
+            existing.created_at = datetime.utcnow()
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Predicción actualizada',
+                'prediction': existing.to_dict()
+            })
+        else:
+            # Crear nueva predicción
+            prediction = CommitmentPrediction(
+                event_id=event_id,
+                user_id=current_user.id,
+                prediction=prediction_value,
+                confidence=data.get('confidence'),
+                reasoning=data.get('reasoning', '').strip(),
+                ip_address=request.remote_addr
+            )
+            
+            db.session.add(prediction)
+            db.session.commit()
+            
+            logger.info(f"Prediction created: user {current_user.id} on event {event_id}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Predicción registrada',
+                'prediction': prediction.to_dict()
+            })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating prediction: {str(e)}")
+        return jsonify({'error': 'Error registrando predicción'}), 500
+
+
+@app.route('/api/commitment/<int:event_id>/confirm', methods=['POST'])
+@require_auth
+def confirm_commitment(current_user, event_id):
+    """Confirmar participación en un evento (subject o creator)"""
+    try:
+        event = CommitmentEvent.query.get(event_id)
+        
+        if not event:
+            return jsonify({'error': 'Evento no encontrado'}), 404
+        
+        if event.status != 'active':
+            return jsonify({'error': 'Solo puedes confirmar eventos activos'}), 400
+        
+        # Verificar si es participante
+        if current_user.id == event.subject_user_id:
+            event.subject_confirmed = True
+            role = 'sujeto'
+        elif current_user.id == event.creator_user_id:
+            event.creator_confirmed = True
+            role = 'creador'
+        else:
+            return jsonify({'error': 'No eres parte de este evento'}), 403
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Confirmado como {role}',
+            'event': event.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error confirming commitment: {str(e)}")
+        return jsonify({'error': 'Error confirmando evento'}), 500
+
+
+@app.route('/api/admin/commitment/<int:event_id>/resolve', methods=['POST'])
+@require_auth
+def resolve_commitment(current_user, event_id):
+    """Resolver un evento de compromiso (admin only)"""
+    try:
+        if current_user.role != 'admin':
+            return jsonify({'error': 'Solo administradores'}), 403
+        
+        event = CommitmentEvent.query.get(event_id)
+        
+        if not event:
+            return jsonify({'error': 'Evento no encontrado'}), 404
+        
+        if event.status != 'active':
+            return jsonify({'error': 'Evento ya resuelto'}), 400
+        
+        data = request.json
+        outcome = data.get('outcome')
+        
+        if outcome not in ['fulfilled', 'not_fulfilled', 'disputed']:
+            return jsonify({'error': 'Resultado inválido'}), 400
+        
+        # Resolver evento
+        event.status = 'resolved'
+        event.resolution_outcome = outcome
+        event.resolution_notes = data.get('notes', '').strip()
+        event.resolution_evidence_url = data.get('evidence_url', '').strip()
+        event.resolved_at = datetime.utcnow()
+        event.resolved_by = current_user.id
+        
+        db.session.commit()
+        
+        # Actualizar estadísticas del usuario
+        update_user_reputation_stats(event.subject_user_id)
+        
+        logger.info(f"Commitment event {event_id} resolved as {outcome} by admin {current_user.id}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Evento resuelto como: {outcome}',
+            'event': event.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error resolving commitment: {str(e)}")
+        return jsonify({'error': 'Error resolviendo evento'}), 500
+
+
+@app.route('/api/user/<int:user_id>/reputation', methods=['GET'])
+def get_user_reputation(user_id):
+    """Obtener estadísticas de reputación de un usuario"""
+    try:
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({'error': 'Usuario no encontrado'}), 404
+        
+        # Obtener o crear stats
+        stats = UserReputationStats.query.get(user_id)
+        
+        if not stats:
+            stats = UserReputationStats(user_id=user_id)
+            db.session.add(stats)
+            db.session.commit()
+        
+        # Obtener eventos recientes
+        recent_events = CommitmentEvent.query.filter_by(
+            subject_user_id=user_id,
+            is_public=True
+        ).order_by(CommitmentEvent.created_at.desc()).limit(10).all()
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'display_name': user.display_name if user.is_premium else None
+            },
+            'reputation_stats': stats.to_dict(),
+            'recent_events': [e.to_dict() for e in recent_events],
+            'disclaimer': 'Esta información es estadística y agregada de predicciones de terceros. NO es una recomendación financiera ni crediticia.'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching reputation: {str(e)}")
+        return jsonify({'error': 'Error obteniendo reputación'}), 500
+
+
+def update_user_reputation_stats(user_id):
+    """Actualizar estadísticas de reputación de un usuario"""
+    try:
+        stats = UserReputationStats.query.get(user_id)
+        
+        if not stats:
+            stats = UserReputationStats(user_id=user_id)
+            db.session.add(stats)
+        
+        # Contar eventos resueltos
+        events = CommitmentEvent.query.filter_by(
+            subject_user_id=user_id,
+            status='resolved'
+        ).all()
+        
+        stats.total_commitments_as_subject = len(events)
+        stats.fulfilled_commitments = sum(1 for e in events if e.resolution_outcome == 'fulfilled')
+        stats.not_fulfilled_commitments = sum(1 for e in events if e.resolution_outcome == 'not_fulfilled')
+        stats.disputed_commitments = sum(1 for e in events if e.resolution_outcome == 'disputed')
+        
+        # Calcular promedio de confianza de la comunidad
+        all_predictions = CommitmentPrediction.query.join(CommitmentEvent).filter(
+            CommitmentEvent.subject_user_id == user_id
+        ).all()
+        
+        stats.total_community_predictions = len(all_predictions)
+        
+        if all_predictions:
+            fulfilled_predictions = sum(1 for p in all_predictions if p.prediction == 'fulfilled')
+            stats.avg_community_confidence = round((fulfilled_predictions / len(all_predictions)) * 100, 1)
+        else:
+            stats.avg_community_confidence = None
+        
+        stats.last_updated = datetime.utcnow()
+        
+        db.session.commit()
+        
+        logger.info(f"Reputation stats updated for user {user_id}")
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating reputation stats: {str(e)}")
+
 # ==================== CONFIGURACIÓN DE EJECUCIÓN ====================
 if __name__ == '__main__':
     # Configurar puerto
@@ -3043,6 +3411,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
