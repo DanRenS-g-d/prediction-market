@@ -793,7 +793,7 @@ class CommitmentPrediction(db.Model):
     __table_args__ = (
         db.Index('idx_prediction_event', 'event_id'),
         db.Index('idx_prediction_user', 'user_id'),
-        db.UniqueConstraint('event_id', 'user_id', name='uq_event_user_prediction'),  # Un usuario = una predicción por evento
+        db.UniqueConstraint('event_id', 'user_id', name='uq_event_user_prediction'),
     )
     
     def to_dict(self):
@@ -822,7 +822,7 @@ class UserReputationStats(db.Model):
     disputed_commitments = db.Column(db.Integer, default=0, nullable=False)
     
     # Estadísticas de predicciones de la comunidad
-    avg_community_confidence = db.Column(db.Float)  # % promedio que la comunidad cree que cumplirá
+    avg_community_confidence = db.Column(db.Float)
     total_community_predictions = db.Column(db.Integer, default=0, nullable=False)
     
     # Metadata
@@ -3043,6 +3043,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
