@@ -678,7 +678,176 @@ class ResolutionEvidence(db.Model):
         db.Index('idx_evidence_batch', 'batch_id'),
         db.Index('idx_evidence_source', 'source'),
     )
+
+# ==================== COMMITMENT EVENTS (REPUTATION SYSTEM) ====================
+
+class CommitmentEvent(db.Model):
+    """Evento de compromiso entre usuarios"""
+    __tablename__ = 'commitment_events'
     
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Participantes
+    subject_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Quien debe cumplir
+    creator_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Quien crea el evento
+    
+    # Detalles del compromiso
+    title = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    commitment_type = db.Column(db.String(50), nullable=False)  # 'loan', 'bet', 'contract', 'promise', 'other'
+    
+    # Criterios de resolución
+    resolution_criteria = db.Column(db.Text, nullable=False)
+    evidence_required = db.Column(db.Text)  # Qué evidencia se necesita
+    
+    # Fechas
+    commitment_date = db.Column(db.DateTime, nullable=False)  # Cuándo se hizo el compromiso
+    deadline = db.Column(db.DateTime, nullable=False)  # Cuándo debe cumplirse
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Estado
+    status = db.Column(db.String(20), default='active', nullable=False)  # active, resolved, cancelled
+    
+    # Resolución
+    resolved_at = db.Column(db.DateTime)
+    resolution_outcome = db.Column(db.String(20))  # 'fulfilled', 'not_fulfilled', 'disputed'
+    resolution_evidence_url = db.Column(db.Text)
+    resolution_notes = db.Column(db.Text)
+    resolved_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    # Confirmación de ambas partes
+    subject_confirmed = db.Column(db.Boolean, default=False, nullable=False)
+    creator_confirmed = db.Column(db.Boolean, default=False, nullable=False)
+    
+    # Visibilidad
+    is_public = db.Column(db.Boolean, default=True, nullable=False)
+    
+    # Relaciones
+    subject_user = db.relationship('User', foreign_keys=[subject_user_id], backref='commitments_as_subject')
+    creator_user = db.relationship('User', foreign_keys=[creator_user_id], backref='commitments_as_creator')
+    resolver = db.relationship('User', foreign_keys=[resolved_by])
+    predictions = db.relationship('CommitmentPrediction', backref='event', cascade='all, delete-orphan')
+    
+    __table_args__ = (
+        db.Index('idx_commitment_subject', 'subject_user_id'),
+        db.Index('idx_commitment_creator', 'creator_user_id'),
+        db.Index('idx_commitment_status', 'status'),
+        db.Index('idx_commitment_deadline', 'deadline'),
+    )
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'subject_user_id': self.subject_user_id,
+            'subject_username': self.subject_user.username if self.subject_user else None,
+            'creator_user_id': self.creator_user_id,
+            'creator_username': self.creator_user.username if self.creator_user else None,
+            'title': self.title,
+            'description': self.description,
+            'commitment_type': self.commitment_type,
+            'resolution_criteria': self.resolution_criteria,
+            'evidence_required': self.evidence_required,
+            'commitment_date': self.commitment_date.isoformat() if self.commitment_date else None,
+            'deadline': self.deadline.isoformat() if self.deadline else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'status': self.status,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+            'resolution_outcome': self.resolution_outcome,
+            'resolution_evidence_url': self.resolution_evidence_url,
+            'resolution_notes': self.resolution_notes,
+            'subject_confirmed': self.subject_confirmed,
+            'creator_confirmed': self.creator_confirmed,
+            'is_public': self.is_public,
+            'total_predictions': len(self.predictions) if self.predictions else 0,
+            'avg_prediction': self._calculate_avg_prediction()
+        }
+    
+    def _calculate_avg_prediction(self):
+        """Calcula el promedio de predicciones (% que creen que cumplirá)"""
+        if not self.predictions:
+            return None
+        fulfilled_count = sum(1 for p in self.predictions if p.prediction == 'fulfilled')
+        return round((fulfilled_count / len(self.predictions)) * 100, 1)
+
+
+class CommitmentPrediction(db.Model):
+    """Predicción de la comunidad sobre si cumplirá el compromiso"""
+    __tablename__ = 'commitment_predictions'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('commitment_events.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    # Predicción
+    prediction = db.Column(db.String(20), nullable=False)  # 'fulfilled', 'not_fulfilled'
+    confidence = db.Column(db.Integer)  # 1-100 (opcional)
+    reasoning = db.Column(db.Text)  # Por qué creen eso (opcional)
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    ip_address = db.Column(db.String(45))
+    
+    # Relaciones
+    user = db.relationship('User', backref='commitment_predictions')
+    
+    __table_args__ = (
+        db.Index('idx_prediction_event', 'event_id'),
+        db.Index('idx_prediction_user', 'user_id'),
+        db.UniqueConstraint('event_id', 'user_id', name='uq_event_user_prediction'),  # Un usuario = una predicción por evento
+    )
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_id': self.event_id,
+            'user_id': self.user_id,
+            'username': self.user.username if self.user else None,
+            'prediction': self.prediction,
+            'confidence': self.confidence,
+            'reasoning': self.reasoning,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class UserReputationStats(db.Model):
+    """Estadísticas de reputación del usuario (NO normativas)"""
+    __tablename__ = 'user_reputation_stats'
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    
+    # Estadísticas como SUJETO (persona que debe cumplir)
+    total_commitments_as_subject = db.Column(db.Integer, default=0, nullable=False)
+    fulfilled_commitments = db.Column(db.Integer, default=0, nullable=False)
+    not_fulfilled_commitments = db.Column(db.Integer, default=0, nullable=False)
+    disputed_commitments = db.Column(db.Integer, default=0, nullable=False)
+    
+    # Estadísticas de predicciones de la comunidad
+    avg_community_confidence = db.Column(db.Float)  # % promedio que la comunidad cree que cumplirá
+    total_community_predictions = db.Column(db.Integer, default=0, nullable=False)
+    
+    # Metadata
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relación
+    user = db.relationship('User', backref='reputation_stats')
+    
+    def to_dict(self):
+        """Devuelve estadísticas INFORMATIVAS, NO normativas"""
+        total = self.total_commitments_as_subject
+        
+        return {
+            'user_id': self.user_id,
+            'total_commitments': total,
+            'fulfilled': self.fulfilled_commitments,
+            'not_fulfilled': self.not_fulfilled_commitments,
+            'disputed': self.disputed_commitments,
+            'fulfillment_rate': round((self.fulfilled_commitments / total * 100) if total > 0 else 0, 1),
+            'avg_community_confidence': self.avg_community_confidence,
+            'total_predictions_received': self.total_community_predictions,
+            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
+            'disclaimer': 'Esta información es estadística y NO constituye una recomendación crediticia o financiera.'
+        }
+
 # ==================== DECORADORES ====================
 def require_auth(func):
     @wraps(func)
@@ -2874,6 +3043,7 @@ if __name__ == '__main__':
         debug=debug,
         threaded=True
     )
+
 
 
 
